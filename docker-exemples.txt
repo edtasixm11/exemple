@@ -1,0 +1,239 @@
+---------------------------------------
+Exemples amb ldapserver
+---------------------------------------
+
+docker run --name h1 -h h1 -d --mount source=ldapdata,target=/var/lib/ldap edtasixm11/ldapserver:dataDB
+docker run --name h1 -h h1 -d --mount source=ldapdata,target=/var/lib/ldap --mount source=ldapconfig,target=/etc/openldap/slapd.d  edtasixm11/ldapserver:dataDB
+docker run --name h1 -h h1 -d --mount source=ldapdata,target=/var/lib/ldap --mount source=mydata,target=/opt/docker  edtasixm11/ldapserver:dataDB
+
+docker swarm init
+docker service create -d --replicas=3  --name myldap edtasixm11/ldapserver:dataDB
+docker service rm myldap
+
+docker plugin install --grant-all-permissions vieux/sshfs
+docker volume create --driver vieux/sshfs -o sshcmd=test@localhost:/home/test -o password=testtest myssh
+docker run -d --name h1 --mount src=myssh,target=/test   edtasixm11/ldapserver:dataDB
+
+docker run -d --name h1   --mount type=tmpfs,target=/apunts   edtasixm11/ldapserver:dataDB
+docker run -d --name h1   --mount type=tmpfs,target=/apunts,tmpfs-mode=1770,tmpfs-size=100M   edtasixm11/ldapserver:dataDB
+
+# ---------------------------------------
+# machine
+# ---------------------------------------
+docker-machine create --driver virtualbox myvm1
+docker-machine create --driver virtualbox myvm2
+docker-machine ls
+  docker-machine ls
+  NAME    ACTIVE   DRIVER       STATE     URL                         SWARM   DOCKER        ERRORS
+  myvm1   -        virtualbox   Running   tcp://192.168.99.100:2376           v17.12.1-ce   
+  myvm2   -        virtualbox   Running   tcp://192.168.99.101:2376           v17.12.1-ce   
+docker-machine ssh myvm1 "docker swarm init --advertise-addr <myvm1 ip>"
+docker-machine ssh myvm2 "docker swarm init --advertise-addr <myvm2 ip>"
+
+myvm1:
+docker-machine ssh myvm1 "docker swarm init --advertise-addr 192.168.99.100"
+    Swarm initialized: current node (lhu2ho6lgum1fi28cuz81ntij) is now a manager.
+    To add a worker to this swarm, run the following command:
+    docker swarm join --token SWMTKN-1-1qfad6qjgv0fdgp4tn5sqs4j0jut4pnlalw82n0obyz5wxa3yo-0rt1og3epptno4ez3zvzy08r8 192.168.99.100:2377
+    To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+docker-machine ssh myvm2 "docker swarm join --token SWMTKN-1-1qfad6qjgv0fdgp4tn5sqs4j0jut4pnlalw82n0obyz5wxa3yo-0rt1og3epptno4ez3zvzy08r8 192.168.99.100:2377"
+This node joined a swarm as a worker.
+
+docker-machine ssh myvm1 "docker node ls"
+ID                            HOSTNAME            STATUS              AVAILABILITY        MANAGER STATUS
+lhu2ho6lgum1fi28cuz81ntij *   myvm1               Ready               Active              Leader
+uxk1crgw8n40s8qqlhy19su9k     myvm2               Ready               Active            
+
+docker-machine env myvm1
+export DOCKER_TLS_VERIFY="1"
+export DOCKER_HOST="tcp://192.168.99.100:2376"
+export DOCKER_CERT_PATH="/root/.docker/machine/machines/myvm1"
+export DOCKER_MACHINE_NAME="myvm1"
+# Run this command to configure your shell: 
+# eval $(docker-machine env myvm1)
+eval $(docker-machine env myvm1)
+
+
+
+
+
+
+-------------------------------------------------
+docker run --rm --volumes-from pg_test -t -i busybox sh
+
+-------------------------------------
+1) Exemple volume amb services
+-------------------------------------
+$ docker service create -d \
+  --replicas=4 \
+  --name devtest-service \
+  --mount source=myvol2,target=/app \
+  nginx:latest
+
+$ docker service ps devtest-service
+
+$ docker service rm devtest-service
+
+------------------------------------
+2) Exemple de volum amb populate
+------------------------------------
+$ docker run -d \
+  --name=nginxtest \
+  --mount source=nginx-vol,destination=/usr/share/nginx/html \
+  nginx:latest
+
+$ docker container stop nginxtest
+
+$ docker container rm nginxtest
+
+$ docker volume rm nginx-vol
+
+-------------------------------------
+3) using a driver
+-------------------------------------
+$ docker plugin install --grant-all-permissions vieux/sshfs
+$ docker volume create --driver vieux/sshfs \
+  -o sshcmd=test@node2:/home/test \
+  -o password=testpassword \
+  sshvolume
+docker run -d \
+  --name sshfs-container \
+  --volume-driver vieux/sshfs \
+  --mount src=sshvolume,target=/app,volume-opt=sshcmd=test@node2:/home/test,volume-opt=password=testpassword \
+  nginx:latest
+
+-------------------------------------
+4) exemple script arrancada postgres
+------------------------------------
+#!/usr/bin/env bash
+set -e
+
+if [ "$1" = 'postgres' ]; then
+    chown -R postgres "$PGDATA"
+
+    if [ -z "$(ls -A "$PGDATA")" ]; then
+        gosu postgres initdb
+    fi
+
+    exec gosu postgres "$@"
+fi
+
+exec "$@"
+
+---------------------------------------
+5) exemple de script amb captura de senyals
+---------------------------------------
+#!/bin/sh
+# Note: I've written this using sh so it works in the busybox container too
+
+# USE the trap if you need to also do manual cleanup after the service is stopped,
+#     or need to start multiple services in the one container
+trap "echo TRAPed signal" HUP INT QUIT TERM
+
+# start service in background here
+/usr/sbin/apachectl start
+
+echo "[hit enter key to exit] or run 'docker stop <container>'"
+read
+
+# stop service and clean up here
+echo "stopping apache"
+/usr/sbin/apachectl stop
+
+echo "exited $0"
+
+
+--------------------------------------------
+6) firefox over vnc
+---------------------------------------------
+# Firefox over VNC
+#
+# VERSION               0.3
+
+FROM ubuntu
+
+# Install vnc, xvfb in order to create a 'fake' display and firefox
+RUN apt-get update && apt-get install -y x11vnc xvfb firefox
+RUN mkdir ~/.vnc
+# Setup a password
+RUN x11vnc -storepasswd 1234 ~/.vnc/passwd
+# Autostart firefox (might not be the best way, but it does the trick)
+RUN bash -c 'echo "firefox" >> /.bashrc'
+
+EXPOSE 5900
+CMD    ["x11vnc", "-forever", "-usepw", "-create"]
+
+
+-----------------------------------------------------
+7) multiples imatges
+------------------------------------------------------
+# Multiple images example
+#
+# VERSION               0.1
+
+FROM ubuntu
+RUN echo foo > bar
+# Will output something like ===> 907ad6c2736f
+
+FROM ubuntu
+RUN echo moo > oink
+# Will output something like ===> 695d7793cbe4
+
+# You'll now have two images, 907ad6c2736f with /bar, and 695d7793cbe4 with
+# /oink.
+
+--------------------------------------------------------
+8) postgres
+----------------------------------------------------------
+#
+# example Dockerfile for https://docs.docker.com/examples/postgresql_service/
+#
+
+FROM ubuntu
+
+# Add the PostgreSQL PGP key to verify their Debian packages.
+# It should be the same key as https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+
+# Add PostgreSQL's repository. It contains the most recent stable release
+#     of PostgreSQL, ``9.3``.
+RUN echo "deb http://apt.postgresql.org/pub/repos/apt/ precise-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+# Install ``python-software-properties``, ``software-properties-common`` and PostgreSQL 9.3
+#  There are some warnings (in red) that show up during the build. You can hide
+#  them by prefixing each apt-get statement with DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y python-software-properties software-properties-common postgresql-9.3 postgresql-client-9.3 postgresql-contrib-9.3
+
+# Note: The official Debian and Ubuntu images automatically ``apt-get clean``
+# after each ``apt-get``
+
+# Run the rest of the commands as the ``postgres`` user created by the ``postgres-9.3`` package when it was ``apt-get installed``
+USER postgres
+
+# Create a PostgreSQL role named ``docker`` with ``docker`` as the password and
+# then create a database `docker` owned by the ``docker`` role.
+# Note: here we use ``&&\`` to run commands one after the other - the ``\``
+#       allows the RUN command to span multiple lines.
+RUN    /etc/init.d/postgresql start &&\
+    psql --command "CREATE USER docker WITH SUPERUSER PASSWORD 'docker';" &&\
+    createdb -O docker docker
+
+# Adjust PostgreSQL configuration so that remote connections to the
+# database are possible.
+RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/9.3/main/pg_hba.conf
+
+# And add ``listen_addresses`` to ``/etc/postgresql/9.3/main/postgresql.conf``
+RUN echo "listen_addresses='*'" >> /etc/postgresql/9.3/main/postgresql.conf
+
+# Expose the PostgreSQL port
+EXPOSE 5432
+
+# Add VOLUMEs to allow backup of config, logs and databases
+VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
+
+# Set the default command to run when starting the container
+CMD ["/usr/lib/postgresql/9.3/bin/postgres", "-D", "/var/lib/postgresql/9.3/main", "-c", "config_file=/etc/postgresql/9.3/main/postgresql.conf"]
+
+
+
